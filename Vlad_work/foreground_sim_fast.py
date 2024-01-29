@@ -7,6 +7,13 @@ import scipy.fft as fft
 from scipy import signal
 import pylab as pl
 import time
+import requests
+from bs4 import BeautifulSoup
+import re
+import random
+import matplotlib.pyplot as plt
+import cv2
+
 
 
 
@@ -677,6 +684,143 @@ class ForeGsim:
             print(("FF @" + str(self.nu[i]) + "MHz: DONE!").split())
 
         return ff
+
+    def gen_snr_map(self):
+
+        url = 'https://www.mrao.cam.ac.uk/surveys/snrs/snrs.data.html'
+
+        # Fetch the content from the URL
+        response = requests.get(url, verify=False)
+        content = response.content
+
+        # Parse the content with BeautifulSoup
+        soup = BeautifulSoup(content, 'html.parser')
+
+        pre_tag = soup.find('pre')
+
+        pre_contents = pre_tag.text
+
+        lines = pre_contents.strip().split("\n")
+        lines = [element for element in lines if element]
+        lines_val = lines[4:-1]
+
+        angle_max = self.imgsize
+
+        snr_in_5x5 = 1.5
+        snr_in_angle = int(np.round((snr_in_5x5/25)*angle_max**2))
+
+        grid = self.ngrid*6
+        random_points = [(random.randint(0, grid-1), random.randint(0, grid-1)) for _ in range(snr_in_angle)]
+
+        sample_idx = [random.randint(0, 302) for _ in range(snr_in_angle)]
+
+        a_values_list = []
+        b_values_list = []
+        flux_values_list = []
+        spectral_idx = []
+
+        for i in sample_idx:
+
+            test_line = lines_val[i]
+            
+            columns = re.split(r' {2,}| (?=[+ - S F C])', test_line)
+            if columns[0]=='':
+                    columns.remove(columns[0])
+            if columns[5]=='?':
+                    columns[5] = 'S'
+
+            columns = [s.replace('?', '') for s in columns]
+
+            ang_size = columns[4] 
+            flux = columns[6]
+            spctrl_idx = columns[7]
+            
+            if spctrl_idx.strip() == '' or spctrl_idx.strip() == 'varies':
+                    spctrl_idx = 0.5 # random value, can be substituted by mean/mode value from the column
+
+            if '>' in flux:
+                flux = flux.replace('>','')
+            if flux.strip() == '':
+                    flux = 7 # random value, can be substituted by mean/mode value from the column
+
+            if 'x' in ang_size:
+                a = float(ang_size.split('x')[0])
+                b = float(ang_size.split('x')[1])
+            else:
+                r = float(ang_size)
+                a = r
+                b = r
+
+            a_values_list.append(a/2)
+            b_values_list.append(b/2)
+            flux_values_list.append(float(flux))
+            spectral_idx.append(float(spctrl_idx))
+
+       
+        nu_ref = float(1000) # 1 GHz to MHz
+
+        spctrl_idx_array = np.array(spectral_idx, dtype=float)
+        flux_values_list_array = np.array(flux_values_list, dtype=float)
+
+        def flux_to_brghtnss_temp(freq, flux):
+
+            freq_hz = freq * 10**6 # Hz
+            c0 = 299792458 # m/s
+            flux_mJy = flux * 10**3 # mJy
+            Theta = 3 * 60 # arcsec, FoV of the instrument not from the BOX_LEN!!! Take as 3 arcmin
+
+            lmbda = (c0/freq_hz) * 10**2 # cm
+            S_nu = flux_mJy
+
+            T = 1.360 * lmbda**2 * S_nu * (Theta**2)**(-1) # in K
+
+            return T
+
+        def draw_multiple_ellipses_on_grid(coordinates, a_values, b_values, angle_max, grid_size, T):
+
+            canvas_angular_size_arcminutes = angle_max * 60
+
+            # Scale factor: number of pixels per arcminute
+            scale_factor = grid_size / canvas_angular_size_arcminutes
+
+            grid = np.zeros((grid_size, grid_size))
+
+            for (center_x, center_y), a, b, T in zip(coordinates, a_values, b_values, T):
+                # Convert ellipse dimensions to grid units
+                semi_major_axis_pixels = int(round(a * scale_factor))
+                semi_minor_axis_pixels = int(round(b * scale_factor))
+
+                # Calculate the range for the ellipse in both x and y directions
+                x_range = np.arange(center_x - semi_minor_axis_pixels, center_x + semi_minor_axis_pixels + 1)
+                y_range = np.arange(center_y - semi_major_axis_pixels, center_y + semi_major_axis_pixels + 1)
+
+                # Ensure the ranges are within the grid boundaries
+                x_range = x_range[(x_range >= 0) & (x_range < grid_size)]
+                y_range = y_range[(y_range >= 0) & (y_range < grid_size)]
+
+                # Fill pixels within the ellipse
+                for x_pixel in x_range:
+                    for y_pixel in y_range:
+                        if ((x_pixel - center_x)**2 / semi_minor_axis_pixels**2 + 
+                            (y_pixel - center_y)**2 / semi_major_axis_pixels**2) <= 1:
+                            grid[y_pixel, x_pixel] = T
+
+            return grid
+       
+        map = np.zeros((self.ngrid, self.ngrid, self.nfreq))
+
+        for i in range(len(self.nu)):
+            F_at_freq = flux_values_list_array*((self.nu[i]/nu_ref)**spctrl_idx_array)
+            T = flux_to_brghtnss_temp(self.nu[i], F_at_freq)
+            # Draw the ellipses
+            map_slice = draw_multiple_ellipses_on_grid(random_points, a_values_list, b_values_list, angle_max, grid, T)
+            map_slice = cv2.resize(map_slice, (self.ngrid, self.ngrid), interpolation=cv2.INTER_NEAREST)
+
+            map[:,:,i] = map_slice
+            map[:, :, i] -= np.mean(map[:, :, i])
+            print(("SNR @" + str(self.nu[i]) + "MHz: DONE!").split())
+            
+        return map
 
 
     def gen_exgal_map(self, test = False, test_phi = None, test_dist = None):
