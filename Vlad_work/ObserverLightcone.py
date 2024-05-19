@@ -17,7 +17,7 @@ class Lightcone_21cmFAST():
         
         self.lightcone = lightcone_object
 
-    def convert_to_obs_space(self):
+    def convert_to_obs_space(self, pix_side):
 
         distances = getattr(self.lightcone, 'lightcone_distances')
     
@@ -47,7 +47,7 @@ class Lightcone_21cmFAST():
                                         pixels_from_edge:-pixels_from_edge,
                                         np.shape(img_profile)[1]-1-i])
                 
-                frame = cv2.resize(frame, (150, 150), interpolation=cv2.INTER_NEAREST)
+                frame = cv2.resize(frame, (pix_side, pix_side), interpolation=cv2.INTER_NEAREST)
                 
             
             frames.append(frame)

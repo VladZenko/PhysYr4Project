@@ -924,8 +924,8 @@ class ForeGsim:
             exgal[:, :, j] = ((imgnu * 1e-26) / solidang)* c ** 2 / (2.0 * kb * (self.nu[j] * 1e6) ** 2)
             exgal[:, :, j] -= np.mean(exgal[:, :, j])
 
-        
-        
+            # Normalize values larger than 24K or less than -24 to 24 or -24 respectively
+            exgal[:, :, j] = np.clip(exgal[:, :, j], -24, 24)
         
 
         time_loop2 = time.time()

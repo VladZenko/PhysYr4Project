@@ -9,14 +9,13 @@ import ObserverLightcone
 import random
 
 
-random_integers = np.load('./dataset/indeces.npz')['arr_0']
+random_integers = [random.randint(1, 100) for _ in range(100)]
 
 box_len = 500
 pix_side = 64
 
-counter = 9532
+counter = 0
 
-random_integers = random_integers[9531:]
 
 
 for i in random_integers:
@@ -40,9 +39,8 @@ for i in random_integers:
 
     counter += 1
 
-    np.savez_compressed('./dataset/lc/lc_{}.npz'.format(counter), obs_lc_obj[0])
+    np.save('./dataset/lc/lc_{}.npy'.format(counter), obs_lc_obj[0])
 
-    print('{}/10,000 DONE'.format(counter))
+    print('{}/100 DONE'.format(counter))
 
 
-# 9532 DONE
